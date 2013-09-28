@@ -1,11 +1,4 @@
-/************************************************************************
-*																																				*
-*					GNUplot.h -- Header file for gnuplot interface class					*
-*                                                                       *
-*					Created by: Andrew Loblaw	on September 26, 2011								*
-*					Modified on: October 2, 2011																*
-*                                                                       *
-************************************************************************/
+
 #pragma once
 
 #include <windows.h>	// Required for a lot of type definitions

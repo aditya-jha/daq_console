@@ -1,11 +1,3 @@
-/************************************************************************
-*																																				*
-*					GNUplot.cpp -- Class file for gnuplot interface								*
-*                                                                       *
-*					Created by: Andrew Loblaw	on September 26, 2011								*
-*					Modified on: October 2, 2011																*
-*                                                                       *
-************************************************************************/
 
 /* requirements:
 * gnuplot has to be installed (http://www.gnuplot.info/download.html)

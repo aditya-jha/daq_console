@@ -1,13 +1,10 @@
 /************************************************************************
 *																																				*
-*					main.cpp -- Main file for testing the gnuplot interface				*
-*                                                                       *
-*					Created by: Andrew Loblaw	on September 26, 2011								*
-*					Modified on: October 2, 2011																*
-*                                                                       *
+*	FILE: main.cpp
+*	AUTHOR: Aditya Jha
+*                  
+*
 ************************************************************************/
-/* This main is meant entirely to test an initialization of a GNUplotInterface
-*	class object and to test all the functionality. */
 
 #include "stdafx.h"
 #include "GNUplot.h"
