@@ -1,47 +1,102 @@
-/*********************************************************************
- *
- *        iUSBDAQ Console Resistance vs Time Code Version 1.00
- *
- *********************************************************************
- * FileName:        main.cpp
- * Author:			Aditya Jha
- * Dependencies:    None
- * Compiler:        Visual C++ 2010 Express
- *********************************************************************/
+/************************************************************************
+*																																				*
+*					main.cpp -- Main file for testing the gnuplot interface				*
+*                                                                       *
+*					Created by: Andrew Loblaw	on September 26, 2011								*
+*					Modified on: October 2, 2011																*
+*                                                                       *
+************************************************************************/
+/* This main is meant entirely to test an initialization of a GNUplotInterface
+*	class object and to test all the functionality. */
 
 #include "stdafx.h"
-#include <cstdio>
-#include <iostream>
+#include "GNUplot.h"
 #include "iUsbApi.h"
-#include <string>
-#include <cstring>
-#include <ctime>
-
 using namespace std;
 
 HINSTANCE libHandle;
-DevSession dev;
-unsigned long devcnt=0;
-int rate = 0;
 
+
+int rate = 0,res=0;
+float voltage=0.00, resistance=0.00;
+int no_of_channels=0;
+int channels[8];
 
 bool LoadDLL( void );
 int PrintError( int code );
-int help( void );
-int call_function( string input );
-int stop( void );
-int exit_func( void );
-int close( void );
-int stop_func( void );
-int start( void );
+void DisplayResult(float* buf, int numberOfCh, int st, FILE **f);
 
-int main( int argc, char* args[] )
+
+long long g_clockFrequency;
+/* A run once routine to obtain the processor clock speed. This function
+*	returns non-zero if it is successful */
+inline DWORD getCpuClockFrequencyMHz(void){
+	DWORD BufSize = _MAX_PATH;
+	DWORD dwMHz = _MAX_PATH;
+	HKEY hKey;
+	long lError = RegOpenKeyEx(HKEY_LOCAL_MACHINE,	//Section of registry where processor clock speed located
+		TEXT("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0"),	//location of processor clock speed value
+		0,	//must be 0
+		KEY_READ,	//Read only (to read the value of the key)
+		&hKey	//store the registry key handle here
+		);
+	if(lError != ERROR_SUCCESS)
+	{// if the key is not found, tell the user why:
+		TCHAR Buffer[_MAX_PATH] = TEXT("Could not find processor clock-speed registry key\n");
+		MessageBox(NULL, Buffer, TEXT("Error"), MB_OK);
+		return(0);	//Error return
+	}
+
+	// query the key
+	RegQueryValueEx(hKey, TEXT("~MHz"), NULL, NULL, (LPBYTE) &dwMHz, &BufSize);
+	return dwMHz;
+}
+inline long long GetCpuClocks(void)
 {
+	// Counter
+	struct { int low, high; } counter;
+
+	// Use RDTSC instruction to get clocks count
+	__asm push EAX
+	__asm push EDX
+	__asm __emit 0fh __asm __emit 031h // RDTSC
+	__asm mov counter.low, EAX
+	__asm mov counter.high, EDX
+	__asm pop EDX
+	__asm pop EAX
+
+	// Return result
+	return *(__int64 *)(&counter);
+}
+inline void pressEnter(void){
+#if defined(_WIN32) || defined(WIN32) || defined(__WIN32__) || defined(__TOS_WIN__)
+	std::cout<<"Press any key to continue..."<<std::endl;
+	_getch();
+#endif
+}
+
+
+int main ( int argc, char** argv )
+{
+
 	BOOLEAN bQuit;
     char selection;
     bQuit = false;
 
-	string input;
+	//string input;
+	
+	FILE *fp;
+	fp = fopen( "daq.csv" , "w" );
+	if( fp == NULL) 
+	{
+		cout << "Cannot open file" <<endl;
+		exit(1);
+	}
+
+	//close file
+	fclose(fp);
+
+	//fprintf( fp, "Hell Yeah\n");
 
     // Load DLL when it is necessary, i.e. on start-up!
     if (!LoadDLL())
@@ -50,175 +105,109 @@ int main( int argc, char* args[] )
 		scanf("%c",&selection);
 		return -1;
 	}
-
-	cout << "Welcome to DAQ\n";
-	cout << "--------------\n\n";
-	cout << "To see the list of valid commands type help\n";
-	cout << "If you know the commands then start away\n\n";
-
-	cout << ">> ";
-	cin  >> input;
-
-	while( true )
-	{
-		if( input == "exit" || input == "EXIT" )
-		{
-			int et = exit_func();
-			if( et == 0 ) break;
-			else {
-				cout << "\nEnter command again\n\n";
-				cout << ">> ";
-				cin  >> input;
-				continue;
-			}
-		}
-		
-		else 
-		{
-			int rt = call_function( input );
-			if( rt == -1 )
-			{
-				cout << "Unable to execute command.\n\n";
-			}
-		}
-
-		cout << ">> ";
-		cin  >> input;
-	}
-
-	return 0;
-}
-
-int call_function( string input ) 
-{
-	if( input == "help" || input == "HELP" )
-	{
-		return help();
-	}
-	else if( input == "stop" || input == "STOP" )
-	{
-		return stop_func();
-	}
-	else if( input == "start" || input == "START" )
-	{
-		return start();
-	}
-	else {
-		cout << "\nNot a valid command. See help for the set of valid commands\n\n";
-		return -1;
-	}
-}
-
-int start( void )
-{
-	devcnt = 0;
+	
+	//cout << "\nDLL Successfully Loaded\n\n";
+	
+	unsigned long devcnt=0;
+	// Device type for iUSBDAQ is 0 according to user manual
 	int rt = IUSBDAQ_EnumerateDevice(0, &devcnt);
 	if ( rt != iUSBDAQ_NOERROR)
 	{
 		return PrintError(rt);				
 	}
-
-	printf("\nFound %d of iUSBDAQ connected, reading data from first iUSBDAQ\n", devcnt);
 	
+	if( devcnt == 0 ) {
+		printf("Found %d of iUSBDAQ connected, reading data from first iUSBDAQ\n", devcnt);
+	}
+	
+	DevSession dev;
 	rt = IUSBDAQOpen(0, 0, &dev);
 	if ( rt != iUSBDAQ_NOERROR)
 	{
-		return PrintError(rt);				
+		return PrintError(rt);	
 	}	
-
-	rate = 0;
-	IUSBDAQStartDaqStream(&dev, 0, 8, 0, 2000, &rate, 0); 
 	
-}
 
-int stop_func( void )
-{
-	int rt = stop();
-	if( rt == 0 ) 
-	{
-		cout << "\nStopped Streaming.\n\n";
-	}
-	else
-	{
-		cout << "\nUnable to Stop Streaming.\n";
-		return -1;
-	}
-	int cl = close();
-	if( cl != 0 )
-	{
-		cout << "Unable to Close Session.\n";
-		return -1;
-	}
-	else
-	{
-		cout << "Clossed Current Session\n\n";
-		Sleep( 500 );
-		return 0;
-	}
-}
-
-int exit_func( void )
-{
-	string sure;
-	cout << "Exiting will stop streaming and Close current session.\n";
-	cout << "Are you sure (Y/N): ";
-	cin  >> sure;
-	if( sure[0] == 'Y' || sure[0] == 'y')
-	{
-		int st = stop();
-		if( st != 0 ) 
-		{
-			cout<< "Unable to stop Streaming.\n";
-			return -1;
-		}
-		int cl = close();
-		if( cl != 0 )
-		{
-			cout << "Unable to Close Session.\n";
-			return -1;
-		}
-
-		cout << "Stopping Streaming\n";
-		cout << "Closing current session\n";
-		Sleep( 1000 );
-		return 0;
-	}
-	else {
-		return -1;
-	}
-}
-
-int help( void ) 
-{
-	cout << "\nWelcome to help menu\n";
-	cout << "---------------------\n\n";
-	cout << "COMMAND		RESULT\n";
-	cout << "---------------------------\n\n";
-	cout << "start		Connects device and starts reading\n";
-	cout << "stop		Stops reading and closses current session\n";
-	cout << "exit		Exits the software\n";
-	cout << "help		Displays the list of supported commands\n";
+	cout << "Welcome to DAQ\n";
+	cout << "--------------\n\n";
+	
+	cout << "Number of channels to scan: ";
+	cin  >> no_of_channels;
 	cout << endl;
 
-	return 0;
-}
+	cout << "\nThe channels\n";
+	for(int i=0; i<no_of_channels; i++) 
+	{
+		cout << "	AI: ";
+		cin  >> channels[i];
+	}
+	cout << endl;
+	
+	
+	cout << "Input Voltage: ";
+	cin >> voltage;
 
-int stop( void ) 
-{
-	IUSBDAQStopDaqStream(&dev);	// end of streaming section
-	return 0;
-}
+	cout << endl << "Resistance: ";
+	cin  >> resistance;
+	
+	// gnuplot
+	g_clockFrequency = getCpuClockFrequencyMHz()*(1000000);
+	long long startTime, endTime;
 
-int close( void )
-{
-	IUSBDAQClose(&dev);
+	/* Create gnuplotinterface class object */
+	GNUPlotInterface gpi;
+
+	/* Create the read/write pipes */
+	gpi.CreatePipes();
+
+	/* Start the gnuplot.exe process with rerouted input/output using pipes */
+	gpi.StartProcess();
+	/*  This is the intialization of realtime plotting as well as title and 
+	*	line type. Be sure to use \" to send the " character. */
+	string gnuplotOutput = gpi.Init("lines","GNUplot Pipe Interface Test");
+
+	cout<<"Initialization - gnuplot output:\n"<<gnuplotOutput.c_str()<<std::endl;
+
+	int i=0;
+	string input;
+
+	while(true) {
+		float value[8];						
+		IUSBDAQReadChannels(&dev, channels[0], no_of_channels, 0, value, 0); 
+		
+		FILE *fp = fopen( "daq.csv" , "a+" );
+
+		DisplayResult( value, no_of_channels, channels[0], &fp);		
+		
+		fclose( fp );
+		
+		double dVal = value[channels[0]];
+		CHAR chVal[20];
+
+		sprintf(chVal,"%d",i); input.append(chVal); input.append(" ");
+		sprintf(chVal,"%.5f",dVal);	input.append(chVal); input.append("\n");
+		
+		gnuplotOutput = gpi.Plot(input.c_str(),0);
+		
+		if(gnuplotOutput.length() > 0)
+			std::cout<<gnuplotOutput.c_str()<<std::endl;
+
+		i++;
+
+		Sleep( 500 );
+	}
+
+	gpi.CloseAll();
+	
+	system("pause");
 	return 0;
 }
 
 bool LoadDLL(void)
 {
+	LPCWSTR str = TEXT("iUSBDAQ");
     libHandle = NULL;
-    libHandle = LoadLibrary("iUSBDAQ");
+    libHandle = LoadLibrary(str);
     if(libHandle == NULL)
     {
         printf("Error loading iUSBDAQ.dll\r\n");
@@ -257,5 +246,29 @@ int PrintError(int code)
 {
 	char a;
 	printf("Error: %s\n", ErrorDesc[code]);
+	printf("Press any key to exit\r\n");
+	scanf("%c", &a);
 	return -1;
+}
+
+void DisplayResult(float* value, int numberOfCh, int st, FILE **f)
+{
+	for (int i = st; i < st+numberOfCh; i++)
+		{
+			cout << setw(5) << "AI"<<i<< " ";
+		}
+		cout<<endl;
+
+		for (int i = st; i < st+numberOfCh; i++)
+		{
+			printf(" %.3f ", value[i]);
+		}
+		cout << endl << endl;
+
+for (int i = st; i < st+numberOfCh; i++)
+		{
+			fprintf( *f, "%.3f,", value[i] );
+		}
+		fprintf( *f, "\n");
+
 }
